@@ -123,3 +123,32 @@ def test_member_lookup_fines_ignore_returned_books(client):
     
     r = client.get(f"/members/{member_id}")
     assert r.get_json()["total_fines"] == 0.00
+
+# --- FEATURE: MEMBERS (CRUD) ---
+def test_list_members(client):
+    create_member(client, "Alice")
+    create_member(client, "Bob")
+    
+    r = client.get("/members")
+    assert r.status_code == 200
+    members = r.get_json()
+    assert len(members) == 2
+    assert members[0]["name"] == "Alice"
+    assert members[1]["name"] == "Bob"
+
+def test_update_and_delete_member(client):
+    member_id = create_member(client, "To Update")
+    
+    # Update
+    r = client.put(f"/members/{member_id}", json={"name": "Updated Name"})
+    assert r.status_code == 200
+    assert r.get_json()["name"] == "Updated Name"
+    
+    # Delete
+    r2 = client.delete(f"/members/{member_id}")
+    assert r2.status_code == 204
+    
+    # Verify deleted
+    r3 = client.get(f"/members/{member_id}")
+    assert r3.status_code == 404
+    
