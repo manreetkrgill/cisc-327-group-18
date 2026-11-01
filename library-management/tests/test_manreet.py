@@ -124,3 +124,75 @@ def test_cannot_delete_a_book_that_is_currently_on_loan(client):
     resp = client.delete(f"/books/{book['id']}")
     assert resp.status_code in (400, 409)
     assert client.get(f"/books/{book['id']}").status_code == 200
+# F6  Check out a book   (R8, R3, R12)
+def test_checkout_creates_loan_with_14_day_due_date(client):
+    book, member = make_book(client), make_member(client)
+    resp = checkout(client, book["id"], member["id"])
+    assert resp.status_code == 201
+    loan = resp.get_json()
+    assert loan["book_id"] == book["id"]
+    assert loan["member_id"] == member["id"]
+    assert loan["loan_date"] == date.today().isoformat()
+    assert loan["due_date"] == (date.today() + timedelta(days=14)).isoformat()
+    assert loan["return_date"] is None
+
+
+def test_checkout_decrements_available_copies_and_loan_is_listed(client):
+    book = make_book(client, total_copies=3)
+    member = make_member(client)
+    loan = checkout(client, book["id"], member["id"]).get_json()
+    after = client.get(f"/books/{book['id']}").get_json()
+    assert after["available_copies"] == 2
+    assert after["total_copies"] == 3          # total never changes
+    assert client.get("/loans").get_json() == [loan]
+
+
+def test_checkout_all_copies_then_one_more_is_refused(client):
+    """EXPECTED FAIL (D5): R3/R8 - once available_copies is 0 the book is
+    'checked out' and a further checkout must be refused. The app returns 201
+    and drives available_copies to -1."""
+    book = make_book(client, total_copies=1)
+    alice, bob = make_member(client), make_member(client, "Bob", "b@example.com")
+    assert checkout(client, book["id"], alice["id"]).status_code == 201
+    assert available(client, book["id"]) == 0
+    second = checkout(client, book["id"], bob["id"])
+    assert second.status_code in (400, 409)
+    assert available(client, book["id"]) == 0      # never negative
+
+# F7  Return a loan   (R8, R3)
+def test_return_sets_return_date_and_restores_available_copies(client):
+    book, member = make_book(client, total_copies=2), make_member(client)
+    loan = checkout(client, book["id"], member["id"]).get_json()
+    assert available(client, book["id"]) == 1
+    resp = client.put(f"/loans/{loan['id']}/return")
+    assert resp.status_code == 200
+    assert resp.get_json()["return_date"] == date.today().isoformat()
+    assert available(client, book["id"]) == 2
+    # persisted: the loan list shows the return date
+    stored = client.get("/loans").get_json()[0]
+    assert stored["return_date"] == date.today().isoformat()
+
+
+def test_checkout_return_checkout_again_workflow(client):
+    """Multi-step: borrow, return, borrow again with a different member."""
+    book = make_book(client, total_copies=1)
+    alice, bob = make_member(client), make_member(client, "Bob", "b@example.com")
+    first = checkout(client, book["id"], alice["id"]).get_json()
+    client.put(f"/loans/{first['id']}/return")
+    second = checkout(client, book["id"], bob["id"])
+    assert second.status_code == 201
+    assert second.get_json()["id"] != first["id"]
+    assert available(client, book["id"]) == 0
+    loans = client.get("/loans").get_json()
+    assert [l["return_date"] is None for l in loans] == [False, True]
+
+
+# F8  Look up loans   (R12, R17)
+def test_lookup_loans_by_member_id_returns_that_members_loans(client):
+    """EXPECTED FAIL (D8): R12 (see what books I checked out). The member_id
+    filter in routes/loans.py compares l.book_id instead of l.member_id, so
+    ?member_id=3 returns [] and ?member_id=1 returns book-1 loans."""
+    _three_loans(client)
+    loans = client.get("/loans?member_id=3").get_json()
+    assert sorted(l["id"] for l in loans) == [1, 2]
+    assert all(l["member_id"] == 3 for l in loans)
