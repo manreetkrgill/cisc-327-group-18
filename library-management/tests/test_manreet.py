@@ -196,3 +196,47 @@ def test_lookup_loans_by_member_id_returns_that_members_loans(client):
     loans = client.get("/loans?member_id=3").get_json()
     assert sorted(l["id"] for l in loans) == [1, 2]
     assert all(l["member_id"] == 3 for l in loans)
+# F9  Renew a loan (R6)
+def test_renew_extends_due_date_by_14_days_and_persists(client):
+    book, member = make_book(client), make_member(client)
+    loan = checkout(client, book["id"], member["id"]).get_json()
+    original_due = date.fromisoformat(loan["due_date"])
+    resp = client.put(f"/loans/{loan['id']}/renew")
+    assert resp.status_code == 200
+    expected = (original_due + timedelta(days=14)).isoformat()
+    assert resp.get_json()["due_date"] == expected
+    assert client.get("/loans").get_json()[0]["due_date"] == expected
+
+
+def test_renew_is_refused_when_another_member_is_queued_for_the_book(client):
+    """EXPECTED FAIL (D9): R6 - a book may be renewed only if nobody is in
+    the hold queue. After Bob reserves the book, renewing Alice's loan still
+    returns 200 and pushes the due date out by another 14 days."""
+    book = make_book(client, total_copies=1)
+    alice, bob = make_member(client), make_member(client, "Bob", "b@example.com")
+    loan = checkout(client, book["id"], alice["id"]).get_json()
+    reserve = client.post("/reservations",
+                          json={"book_id": book["id"], "member_id": bob["id"]})
+    assert reserve.status_code == 201
+    resp = client.put(f"/loans/{loan['id']}/renew")
+    assert resp.status_code in (400, 409)
+    assert client.get("/loans").get_json()[0]["due_date"] == loan["due_date"]
+
+# F10  Web UI - Loans page (R5, R8)
+def test_home_page_links_to_the_loans_page(client):
+    """R8: check-out starts one click from the main screen."""
+    html = client.get("/").get_data(as_text=True)
+    assert 'href="/ui/loans"' in html
+
+
+def test_ui_checkout_creates_loan_decrements_stock_and_shows_it(client):
+    book, member = make_book(client, total_copies=2), make_member(client)
+    resp = client.post("/ui/loans",
+                       data={"book_id": book["id"], "member_id": member["id"]})
+    assert resp.status_code == 302                       # redirect back
+    assert resp.headers["Location"].endswith("/ui/loans")
+    assert available(client, book["id"]) == 1
+    assert len(client.get("/loans").get_json()) == 1     # visible through the API
+    html = client.get("/ui/loans").get_data(as_text=True)
+    assert "<td>1</td>" in html and "Return" in html
+
