@@ -98,7 +98,6 @@ def test_search_by_isbn_finds_the_book(client):
     found = client.get("/books?search=978-0132350884").get_json()
     assert [b["title"] for b in found] == ["Clean Code"]
 
-
 # F4  Update a book
 def test_update_book_changes_given_fields_and_keeps_the_rest(client):
     book = make_book(client, title="Old", author="Author", isbn="1", total_copies=2)
@@ -124,6 +123,7 @@ def test_cannot_delete_a_book_that_is_currently_on_loan(client):
     resp = client.delete(f"/books/{book['id']}")
     assert resp.status_code in (400, 409)
     assert client.get(f"/books/{book['id']}").status_code == 200
+
 # F6  Check out a book   (R8, R3, R12)
 def test_checkout_creates_loan_with_14_day_due_date(client):
     book, member = make_book(client), make_member(client)
@@ -157,9 +157,9 @@ def test_checkout_all_copies_then_one_more_is_refused(client):
     assert available(client, book["id"]) == 0
     second = checkout(client, book["id"], bob["id"])
     assert second.status_code in (400, 409)
-    assert available(client, book["id"]) == 0      # never negative
+    assert available(client, book["id"]) == 0  # never negative
 
-# F7  Return a loan   (R8, R3)
+# F7  Return a loan (R8, R3)
 def test_return_sets_return_date_and_restores_available_copies(client):
     book, member = make_book(client, total_copies=2), make_member(client)
     loan = checkout(client, book["id"], member["id"]).get_json()
@@ -187,7 +187,19 @@ def test_checkout_return_checkout_again_workflow(client):
     assert [l["return_date"] is None for l in loans] == [False, True]
 
 
-# F8  Look up loans   (R12, R17)
+# F8  Look up loans  (R12, R17)
+def _three_loans(client):
+    """book1/book2 and members 1/2/3 chosen so that book ids and member ids
+    differ, which exposes a filter that compares the wrong field."""
+    b1 = make_book(client, title="B1", isbn="1", total_copies=5)
+    b2 = make_book(client, title="B2", isbn="2", total_copies=5)
+    for n in ("m1", "m2", "m3"):
+        make_member(client, n, f"{n}@example.com")
+    checkout(client, b1["id"], 3)   # loan 1: book 1, member 3
+    checkout(client, b2["id"], 3)   # loan 2: book 2, member 3
+    checkout(client, b2["id"], 1)   # loan 3: book 2, member 1
+    return b1, b2
+
 def test_lookup_loans_by_member_id_returns_that_members_loans(client):
     """EXPECTED FAIL (D8): R12 (see what books I checked out). The member_id
     filter in routes/loans.py compares l.book_id instead of l.member_id, so
@@ -196,6 +208,7 @@ def test_lookup_loans_by_member_id_returns_that_members_loans(client):
     loans = client.get("/loans?member_id=3").get_json()
     assert sorted(l["id"] for l in loans) == [1, 2]
     assert all(l["member_id"] == 3 for l in loans)
+
 # F9  Renew a loan (R6)
 def test_renew_extends_due_date_by_14_days_and_persists(client):
     book, member = make_book(client), make_member(client)
@@ -240,3 +253,67 @@ def test_ui_checkout_creates_loan_decrements_stock_and_shows_it(client):
     html = client.get("/ui/loans").get_data(as_text=True)
     assert "<td>1</td>" in html and "Return" in html
 
+"""Features assigned to Member B in Table B (F12, F18, F19, F20). 
+Added by Member A to close report gaps,but these features remain 
+assigned to Member B in Table B."""
+
+# F12 Add a member (POST /members) 
+def test_add_member_returns_all_fields_and_is_retrievable(client):
+    resp = client.post("/members", json={"name": "Bob", "email": "bob@example.com"})
+    assert resp.status_code == 201
+    member = resp.get_json()
+    assert member["name"] == "Bob"
+    assert member["email"] == "bob@example.com"
+    assert "id" in member
+    assert client.get(f"/members/{member['id']}").get_json()["name"] == "Bob"
+
+
+# F18 List reservations (GET /reservations)
+def test_list_reservations_returns_all_placed_reservations(client):
+    book = make_book(client, total_copies=2)
+    alice, bob = make_member(client), make_member(client, "Bob", "b@example.com")
+    client.post("/reservations", json={"book_id": book["id"], "member_id": alice["id"]})
+    client.post("/reservations", json={"book_id": book["id"], "member_id": bob["id"]})
+    resp = client.get("/reservations")
+    assert resp.status_code == 200
+    rows = resp.get_json()
+    assert len(rows) == 2
+    assert {r["member_id"] for r in rows} == {alice["id"], bob["id"]}
+
+
+def test_list_reservations_is_empty_when_none_placed(client):
+    assert client.get("/reservations").get_json() == []
+
+
+# F19 Web UI: Books page (add/delete)
+def test_ui_add_book_creates_book_and_shows_in_list(client):
+    resp = client.post("/ui/books", data={
+        "title": "UI Book", "author": "A", "isbn": "999", "total_copies": 1})
+    assert resp.status_code == 302
+    books = client.get("/books").get_json()
+    assert [b["title"] for b in books] == ["UI Book"]
+    html = client.get("/ui/books").get_data(as_text=True)
+    assert "UI Book" in html
+
+def test_ui_delete_book_removes_it_from_list(client):
+    book = make_book(client)
+    resp = client.post(f"/ui/books/{book['id']}/delete")
+    assert resp.status_code == 302
+    assert client.get("/books").get_json() == []
+
+
+# F20 Web UI: Members page (add/delete)
+def test_ui_add_member_creates_member_and_shows_in_list(client):
+    resp = client.post("/ui/members", data={"name": "UI Mem", "email": "ui@example.com"})
+    assert resp.status_code == 302
+    members = client.get("/members").get_json()
+    assert [m["name"] for m in members] == ["UI Mem"]
+    html = client.get("/ui/members").get_data(as_text=True)
+    assert "UI Mem" in html
+
+
+def test_ui_delete_member_removes_it_from_list(client):
+    member = make_member(client)
+    resp = client.post(f"/ui/members/{member['id']}/delete")
+    assert resp.status_code == 302
+    assert client.get("/members").get_json() == []
