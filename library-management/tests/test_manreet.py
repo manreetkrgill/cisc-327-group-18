@@ -316,4 +316,78 @@ def test_ui_delete_member_removes_it_from_list(client):
     member = make_member(client)
     resp = client.post(f"/ui/members/{member['id']}/delete")
     assert resp.status_code == 302
-    assert client.get("/members").get_json() == []
+    assert client.get("/members").get_json() == []# ENHANCEMENT (Member A) - R4: front-desk overdue notifications
+#   GET /overdue[?member_id=]   (app/routes/overdue.py)
+
+def _make_overdue(client, days, title="Clean Code", name="Alice",
+                  email="alice@example.com", isbn=None, copies=3):
+    """Create a book, a member and a loan that is `days` past its due date."""
+    book = make_book(client, title=title, isbn=isbn or title, total_copies=copies)
+    member = make_member(client, name, email)
+    loan = checkout(client, book["id"], member["id"]).get_json()
+    store.loans[loan["id"]].due_date = date.today() - timedelta(days=days)
+    return book, member, loan
+
+
+def test_overdue_is_empty_when_nothing_is_overdue(client):
+    book, member = make_book(client), make_member(client)
+    checkout(client, book["id"], member["id"])        # due in 14 days
+    resp = client.get("/overdue")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["count"] == 0 and body["alerts"] == []
+    assert body["as_of"] == date.today().isoformat()
+
+
+def test_overdue_alert_contains_member_book_days_and_fine(client):
+    book, member, loan = _make_overdue(client, days=4)
+    body = client.get("/overdue").get_json()
+    assert body["count"] == 1
+    alert = body["alerts"][0]
+    assert alert["loan_id"] == loan["id"]
+    assert alert["book_id"] == book["id"] and alert["book_title"] == "Clean Code"
+    assert alert["member_id"] == member["id"]
+    assert alert["member_name"] == "Alice"
+    assert alert["member_email"] == "alice@example.com"
+    assert alert["due_date"] == (date.today() - timedelta(days=4)).isoformat()
+    assert alert["days_overdue"] == 4
+    assert alert["fine_amount"] == 1.00
+    assert "Alice" in alert["message"] and "4 day(s)" in alert["message"]
+
+
+def test_loan_due_today_is_not_overdue_but_due_yesterday_is(client):
+    """Boundary: overdue starts the day after the due date."""
+    _make_overdue(client, days=0, title="Due today")
+    assert client.get("/overdue").get_json()["count"] == 0
+    _make_overdue(client, days=1, title="Due yesterday", name="Bob",
+                  email="bob@example.com")
+    alerts = client.get("/overdue").get_json()["alerts"]
+    assert [a["book_title"] for a in alerts] == ["Due yesterday"]
+    assert alerts[0]["days_overdue"] == 1 and alerts[0]["fine_amount"] == 0.25
+
+
+def test_returning_an_overdue_book_removes_the_alert(client):
+    """Multi-step: overdue -> alert shown -> return -> alert gone."""
+    _, _, loan = _make_overdue(client, days=5)
+    assert client.get("/overdue").get_json()["count"] == 1
+    assert client.put(f"/loans/{loan['id']}/return").status_code == 200
+    assert client.get("/overdue").get_json() == {
+        "as_of": date.today().isoformat(), "count": 0, "alerts": []}
+
+
+def test_overdue_can_be_filtered_by_member(client):
+    _, alice, _ = _make_overdue(client, days=3, title="A", isbn="a")
+    _, bob, _ = _make_overdue(client, days=6, title="B", name="Bob",
+                              email="bob@example.com", isbn="b")
+    only_bob = client.get(f"/overdue?member_id={bob['id']}").get_json()
+    assert only_bob["count"] == 1
+    assert only_bob["alerts"][0]["member_name"] == "Bob"
+    assert client.get("/overdue?member_id=999").get_json()["count"] == 0
+
+
+def test_overdue_fine_matches_the_existing_per_loan_fine_endpoint(client):
+    """Consistency with GET /loans/<id>/fine for an unreturned loan."""
+    _, _, loan = _make_overdue(client, days=7)
+    alert = client.get("/overdue").get_json()["alerts"][0]
+    fine = client.get(f"/loans/{loan['id']}/fine").get_json()["fine_amount"]
+    assert alert["fine_amount"] == fine == 1.75
