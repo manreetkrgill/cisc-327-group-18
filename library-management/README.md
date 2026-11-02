@@ -36,6 +36,7 @@ app working without a REST client, and calls the same in-memory store.
 - **Book**: `id, title, author, isbn, total_copies, available_copies`
 - **Member**: `id, name, email, membership_date`
 - **Loan**: `id, book_id, member_id, loan_date, due_date, return_date`
+- **OverdueAlert** (computed, not stored): `loan_id, book_id, book_title, member_id, member_name, member_email, due_date, days_overdue, fine_amount, message`
 
 ## JSON API Endpoints
 
@@ -54,6 +55,7 @@ app working without a REST client, and calls the same in-memory store.
 | POST | `/loans` | Check out a book (`book_id`, `member_id`) |
 | PUT | `/loans/<id>/return` | Return a loaned book |
 | GET | `/loans?member_id=&book_id=` | Look up loans |
+| GET | `/overdue?member_id=` | List overdue, unreturned loans (most overdue first) with member, book, days overdue and fine; `member_id` is optional |
 
 ## Tests
 
