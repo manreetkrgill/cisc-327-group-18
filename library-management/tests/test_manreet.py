@@ -1,6 +1,7 @@
 """Member A tests - existing features """
 
 import time
+import pytest
 from datetime import date, timedelta
 
 from app import store
@@ -54,7 +55,7 @@ def test_add_book_returns_all_fields_and_is_retrievable(client):
     # persistent state: a later GET returns the same record
     assert client.get("/books/1").get_json() == book
 
-
+@pytest.mark.xfail(reason="D2: Missing field returns 500 instead of 4xx")
 def test_add_book_missing_required_field_is_rejected_with_client_error(client):
     """EXPECTED FAIL (D2): R5 (usable by non-technical staff) - an incomplete
     request should get a 4xx message, but the app crashes with HTTP 500
@@ -88,7 +89,7 @@ def test_search_by_author(client):
     found = client.get("/books?search=herbert").get_json()
     assert [b["title"] for b in found] == ["Dune"]
 
-
+@pytest.mark.xfail(reason="D1: ISBN not searched")
 def test_search_by_isbn_finds_the_book(client):
     """EXPECTED FAIL (D1): R1 says staff must be able to look a book up by
     title, author OR ISBN. /books?search=<isbn> returns [] because only title
@@ -111,7 +112,7 @@ def test_update_book_changes_given_fields_and_keeps_the_rest(client):
     assert after["isbn"] == "1"
     assert after["total_copies"] == 2
 
-
+@pytest.mark.xfail(reason="D4: Delete orphans loan")
 # F5  Delete a book
 def test_cannot_delete_a_book_that_is_currently_on_loan(client):
     """EXPECTED FAIL (D4): R17 (keep track of books not returned) - deleting a
@@ -146,7 +147,7 @@ def test_checkout_decrements_available_copies_and_loan_is_listed(client):
     assert after["total_copies"] == 3          # total never changes
     assert client.get("/loans").get_json() == [loan]
 
-
+@pytest.mark.xfail(reason="D5: Checkout bypasses 0 stock")
 def test_checkout_all_copies_then_one_more_is_refused(client):
     """EXPECTED FAIL (D5): R3/R8 - once available_copies is 0 the book is
     'checked out' and a further checkout must be refused. The app returns 201
@@ -200,6 +201,7 @@ def _three_loans(client):
     checkout(client, b2["id"], 1)   # loan 3: book 2, member 1
     return b1, b2
 
+@pytest.mark.xfail(reason="D8: member_id filters on book_id")
 def test_lookup_loans_by_member_id_returns_that_members_loans(client):
     """EXPECTED FAIL (D8): R12 (see what books I checked out). The member_id
     filter in routes/loans.py compares l.book_id instead of l.member_id, so
@@ -220,7 +222,7 @@ def test_renew_extends_due_date_by_14_days_and_persists(client):
     assert resp.get_json()["due_date"] == expected
     assert client.get("/loans").get_json()[0]["due_date"] == expected
 
-
+@pytest.mark.xfail(reason="D9: Renewal bypasses queue")
 def test_renew_is_refused_when_another_member_is_queued_for_the_book(client):
     """EXPECTED FAIL (D9): R6 - a book may be renewed only if nobody is in
     the hold queue. After Bob reserves the book, renewing Alice's loan still
