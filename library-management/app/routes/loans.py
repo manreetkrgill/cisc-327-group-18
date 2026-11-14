@@ -4,7 +4,6 @@ from flask import Blueprint, jsonify, request
 
 from app import store
 from app.models.loan import Loan, LOAN_PERIOD_DAYS
-from notification_service import send_notification, SENDER_PREFIX
 
 FINE_PER_DAY = 0.25  # dollars charged per day overdue
 
@@ -54,16 +53,6 @@ def return_book(loan_id):
     loan.return_date = date.today()
     book = store.books.get(loan.book_id)
     book.available_copies += 1
-
-    # --- NOTIFICATION INTEGRATION ---
-    if loan.due_date < date.today():
-        member = store.members.get(loan.member_id)
-        if member and book:
-            send_notification(
-                member.email, 
-                f"{SENDER_PREFIX} Overdue Return", 
-                f"Your book '{book.title}' was returned late."
-            )
 
     return jsonify(loan.to_dict())
 
