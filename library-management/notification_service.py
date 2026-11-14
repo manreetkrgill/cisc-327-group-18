@@ -1,13 +1,32 @@
-# notification_service.py
+"""Notification simulator - Assignment 3."""
+
+_notifications = []
+
 SENDER_PREFIX = "[City Library]"
 
-def send_notification(recipient, subject, message):
-    """
-    Simulates sending a notification. Returns True on success, False on failure.
-    """
-    # Email validation check (as Santiago claimed he did)
-    if not isinstance(recipient, str) or "@" not in recipient:
-        return False
-        
-    # In a real app, this would connect to an SMTP server or API. Here, it just simulates success.
+def is_service_available() -> bool:
     return True
+
+def send_notification(recipient: str, subject: str, message: str) -> bool:
+    if not all(isinstance(value, str) and value.strip()
+               for value in (recipient, subject, message)):
+        return False
+
+    if "@" not in recipient:
+        return False
+
+    if not is_service_available():
+        return False
+
+    _notifications.append({
+        "recipient": recipient,
+        "subject": subject,
+        "message": message,
+    })
+    return True
+
+def get_notifications() -> list:
+    return [n.copy() for n in _notifications]
+
+def clear_notifications() -> None:
+    _notifications.clear()
