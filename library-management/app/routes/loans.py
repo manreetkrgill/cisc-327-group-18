@@ -6,6 +6,7 @@ from app import store
 from app.models.loan import Loan, LOAN_PERIOD_DAYS
 from notification_service import send_notification, SENDER_PREFIX
 
+
 FINE_PER_DAY = 0.25  # dollars charged per day overdue
 
 loans_bp = Blueprint("loans", __name__, url_prefix="/loans")
@@ -55,14 +56,15 @@ def return_book(loan_id):
     book = store.books.get(loan.book_id)
     book.available_copies += 1
 
-    # --- Assignment 3 Integration ---
-    if loan.return_date > loan.due_date:
+    # NOTIFICATION INTEGRATION
+    if loan.due_date < date.today():
         member = store.members.get(loan.member_id)
-        if member and hasattr(member, 'email'):
-            subject = f"{SENDER_PREFIX} Overdue Return"
-            message = f"Dear {member.name}, you returned '{book.title}' late. A fine may apply."
-            
-            send_notification(member.email, subject, message)
+        if member and book:
+            send_notification(
+                member.email, 
+                f"{SENDER_PREFIX} Overdue Return", 
+                f"{member.name}, your book '{book.title}' was returned late."
+            )
 
     return jsonify(loan.to_dict())
 
@@ -86,7 +88,8 @@ def get_fine(loan_id):
         return jsonify({"error": "Loan not found"}), 404
 
     # BUG: always uses date.today() as the end date, even when the book has
-    # already been returned.
+    # already been returned. A returned loan should use loan.return_date so
+    # the fine is fixed at the moment of return — but that line is missing here.
     end_date = date.today()
     days_overdue = max(0, (end_date - loan.due_date).days)
     fine_amount = round(days_overdue * FINE_PER_DAY, 2)
