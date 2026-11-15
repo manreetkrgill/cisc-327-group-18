@@ -63,7 +63,7 @@ def return_book(loan_id):
             send_notification(
                 member.email, 
                 f"{SENDER_PREFIX} Overdue Return", 
-                f"Your book '{book.title}' was returned late."
+                f"{member.name}, your book '{book.title}' was returned late."
             )
 
     return jsonify(loan.to_dict())
