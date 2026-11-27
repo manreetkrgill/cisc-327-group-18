@@ -1,7 +1,9 @@
 from flask import Blueprint, jsonify, request
+from datetime import date
 
 from app import store
 from app.models.member import Member
+from app.routes.loans import FINE_PER_DAY
 
 members_bp = Blueprint("members", __name__, url_prefix="/members")
 
@@ -25,7 +27,20 @@ def get_member(member_id):
     member = store.members.get(member_id)
     if member is None:
         return jsonify({"error": "Member not found"}), 404
-    return jsonify(member.to_dict())
+        
+    # Calculate total fines for all active overdue loans
+    total_fine = 0.0
+    today = date.today()
+    for loan in store.loans.values():
+        if loan.member_id == member_id and loan.return_date is None:
+            days_overdue = max(0, (today - loan.due_date).days)
+            total_fine += days_overdue * FINE_PER_DAY
+            
+    # Convert member to dict and inject the new field
+    member_data = member.to_dict()
+    member_data["total_fines"] = round(total_fine, 2)
+    
+    return jsonify(member_data)
 
 
 @members_bp.route("/<int:member_id>", methods=["PUT"])
